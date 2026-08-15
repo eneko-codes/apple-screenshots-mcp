@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- CFBundleName is the label macOS shows in System Settings > Privacy & Security >
+	     Photos. Keep it identical to the binary name so the toggle is recognisable. -->
+	<key>CFBundleName</key>
+	<string>apple-screenshots-mcp</string>
+	<key>CFBundleIdentifier</key>
+	<string>codes.eneko.apple-screenshots-mcp</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+
+	<!-- The only usage description this server needs, and the only one macOS offers for
+	     Photos: the grant is library-wide. There is no screenshots-only permission, so
+	     the wording says plainly what is being asked for and what the code then does with
+	     it. Key name verified against the tccd binary on macOS 26.5. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Lets Claude read the Screenshots album on this Mac and extract text from it. macOS grants photo access for the whole library; this server only ever reads that one album, and no image leaves it.</string>
+</dict>
+</plist>

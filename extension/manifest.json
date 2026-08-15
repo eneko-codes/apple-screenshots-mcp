@@ -1,0 +1,56 @@
+{
+  "manifest_version": "0.3",
+  "name": "apple-screenshots-mcp",
+  "display_name": "Apple Screenshots",
+  "version": "1.0.0",
+  "description": "Read the macOS Screenshots album and extract its text with Vision. Metadata and text only — never an image.",
+  "long_description": "A local MCP server written in Swift that lets Claude read the text in your screenshots.\n\nIt is not a photo-library server. It fetches exactly one collection — the Screenshots smart album macOS maintains by itself — and runs Vision text recognition over the images you point it at. Photographs are never listed and never read, not even by naming an identifier: ids are resolved inside that album.\n\nBe clear about what the permission covers. macOS grants Photos access at the level of the WHOLE LIBRARY; there is no screenshots-only permission, and no read-only one either, so the system dialog asks for more than this server uses. The narrowing is done by this server's code, not by the operating system. That is a real restriction — there is one fetch in the source, hard-coded to that album, and you can read it — but it is discipline rather than a sandbox.\n\nNo image data ever crosses the boundary: no file paths, no thumbnails, no exports, no base64. The tools return metadata and text. If you want to see a screenshot, open Photos.\n\nThere are no write tools. This extension cannot alter your photo library.\n\nScreenshots taken with ⌘⇧3 or ⌘⇧4 land on your Desktop as ordinary files and never reach Photos. This album holds the ones that came from an iPhone or iPad, or that you added to Photos yourself.\n\nNot affiliated with or endorsed by Apple Inc.",
+  "author": {
+    "name": "eneko-codes",
+    "url": "https://github.com/eneko-codes"
+  },
+  "homepage": "https://github.com/eneko-codes/apple-screenshots-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eneko-codes/apple-screenshots-mcp"
+  },
+  "license": "MIT",
+  "icon": "icon.png",
+  "keywords": [
+    "screenshots",
+    "ocr",
+    "vision",
+    "photokit",
+    "macos",
+    "apple"
+  ],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/apple-screenshots-mcp",
+    "mcp_config": {
+      "command": "${__dirname}/server/apple-screenshots-mcp",
+      "args": [],
+      "env": {}
+    }
+  },
+  "tools": [
+    {
+      "name": "screenshots_status",
+      "description": "Report the Photos permission, how many screenshots are in scope, and exactly what the grant covers. Reads no image."
+    },
+    {
+      "name": "screenshots_list",
+      "description": "List screenshots newest first with id, capture time and pixel size. Metadata only — no image, path or thumbnail."
+    },
+    {
+      "name": "screenshot_extract_text",
+      "description": "Run Vision text recognition over one or more screenshots and return the text. The only tool that reads content."
+    }
+  ],
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": [
+      "darwin"
+    ]
+  }
+}
