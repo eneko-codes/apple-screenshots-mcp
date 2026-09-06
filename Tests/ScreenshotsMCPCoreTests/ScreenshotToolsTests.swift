@@ -35,22 +35,19 @@ struct ScreenshotToolsTests {
         }
     }
 
-    /// A description claiming a ceiling different from what the server enforces would cost
-    /// the model a wasted call to discover the truth. Both read the same `Configuration`
-    /// constant, so this mostly guards against a typo splitting them apart.
-    @Test("The extraction ceiling appears in the tool description and the schema")
-    func descriptionReflectsConfiguration() {
+    /// A description or schema claiming a limit different from what the server enforces
+    /// would cost the model a wasted call to discover the truth. Both read the same
+    /// `Configuration` constants, so this mostly guards against a typo splitting them
+    /// apart.
+    @Test("Configuration constants propagate into the tool schemas")
+    func schemasReflectConfiguration() {
         let extract = ToolCatalog.all().first { $0.name == "screenshot_extract_text" }
         #expect(
             extract?.description?.contains("\(Configuration.maximumExtractIDs) ids per call")
                 == true)
-
         let ids = extract?.inputSchema.objectValue?["properties"]?.objectValue?["ids"]
         #expect(ids?.objectValue?["maxItems"]?.intValue == Configuration.maximumExtractIDs)
-    }
 
-    @Test("The default page size appears as the schema default")
-    func listDefaultReflectsConfiguration() {
         let list = ToolCatalog.all().first { $0.name == "screenshots_list" }
         let limit = list?.inputSchema.objectValue?["properties"]?.objectValue?["limit"]
         #expect(limit?.objectValue?["default"]?.intValue == Configuration.listLimit)
@@ -114,20 +111,20 @@ struct ScreenshotToolsTests {
 
     // MARK: Permission
 
-    @Test("A denied permission names the switch and where to find it")
-    func deniedPermissionExplainsItself() async {
-        let result = await call("screenshots_list", store: FakeScreenshotStore(status: .denied))
-        #expect(result.isError)
-        #expect(result.text.contains("System Settings"))
-        #expect(result.text.contains("apple-screenshots-mcp"))
-    }
+    /// Each unusable state has its own remedy, and the wrong one told to the wrong person
+    /// wastes their time: denied is the user's to fix in System Settings, restricted is
+    /// not.
+    @Test("A denied or restricted permission explains itself, each with the right remedy")
+    func unusablePermissionExplainsItself() async {
+        let denied = await call("screenshots_list", store: FakeScreenshotStore(status: .denied))
+        #expect(denied.isError)
+        #expect(denied.text.contains("System Settings"))
+        #expect(denied.text.contains("apple-screenshots-mcp"))
 
-    @Test("A restricted permission says it cannot be granted from System Settings")
-    func restrictedPermissionExplainsItself() async {
-        let result = await call(
+        let restricted = await call(
             "screenshots_list", store: FakeScreenshotStore(status: .restricted))
-        #expect(result.isError)
-        #expect(result.text.contains("policy"))
+        #expect(restricted.isError)
+        #expect(restricted.text.contains("policy"))
     }
 
     @Test("An undetermined permission is requested once, then the call proceeds")
@@ -164,12 +161,6 @@ struct ScreenshotToolsTests {
         #expect(store.accessRequests == 0, "status must not trigger a consent dialog")
     }
 
-    @Test("screenshots_status counts what is in scope when it can")
-    func statusReportsCount() async {
-        let result = await call("screenshots_status")
-        #expect(result.text.contains("4 screenshots in the album"))
-    }
-
     @Test("screenshots_status admits it cannot count without the grant")
     func statusAdmitsUnknownCount() async {
         let result = await call("screenshots_status", store: FakeScreenshotStore(status: .denied))
@@ -177,20 +168,20 @@ struct ScreenshotToolsTests {
     }
 
     /// The honesty requirement, asserted rather than trusted to review: the status tool
-    /// must say the grant is library-wide and that the narrowing is code, not a sandbox.
-    @Test("screenshots_status states that the scope is code, not a permission")
-    func statusIsHonestAboutScope() async {
+    /// must count what is in scope, say the grant is library-wide and that the narrowing
+    /// is code rather than a sandbox, and report the fixed operating limits — all from
+    /// one authorized call.
+    @Test("screenshots_status reports count, configuration and the honest scope statement")
+    func statusReportsCountConfigurationAndScope() async {
         let result = await call("screenshots_status")
+        #expect(result.text.contains("4 screenshots in the album"))
+
         #expect(result.text.contains("WHOLE LIBRARY"))
         #expect(result.text.contains("NOT BY THE OS"))
         #expect(result.text.contains("sandbox"))
         #expect(result.text.contains("PHAssetCollectionSubtypeSmartAlbumScreenshots"))
         #expect(result.text.contains("No image data ever crosses"))
-    }
 
-    @Test("screenshots_status reports the fixed operating limits")
-    func statusReportsConfiguration() async {
-        let result = await call("screenshots_status")
         #expect(result.text.contains("Vision automatic detection"))
         #expect(result.text.contains("at most \(Configuration.maximumExtractIDs)"))
         #expect(result.text.contains("\(Configuration.listLimit)"))
@@ -269,6 +260,9 @@ struct ScreenshotToolsTests {
         #expect(result.text.contains("2026-08-12T09:00"))
     }
 
+    /// "Clamps rather than rejects: a model asking for 500 results means 'as many as you
+    /// will give me'" (see Arguments.int). An out-of-range limit must not turn into an
+    /// error the caller has to recover from.
     @Test("An out-of-range limit is clamped rather than rejected")
     func limitIsClamped() async {
         let result = await call("screenshots_list", ["limit": .int(9999)])
@@ -291,14 +285,6 @@ struct ScreenshotToolsTests {
         #expect(first.lowerBound < second.lowerBound)
     }
 
-    @Test("The header counts how many ids produced text")
-    func extractHeaderCounts() async {
-        let result = await call(
-            "screenshot_extract_text",
-            ["ids": .array([.string(Fixtures.newest), .string(Fixtures.photograph)])])
-        #expect(result.text.contains("Text from 1 of 2 screenshots"))
-    }
-
     /// The load-bearing test of the whole repository. An id belonging to a photograph must
     /// not resolve, and the refusal must explain that ids are scoped to the album.
     @Test("An id outside the Screenshots album is refused, not read")
@@ -312,32 +298,34 @@ struct ScreenshotToolsTests {
         #expect(result.text.contains("ordinary photograph"))
     }
 
-    /// A stale id must not cost the caller the ids that still work.
-    @Test("One unknown id does not sink the whole batch")
+    /// A stale id must not cost the caller the ids that still work, and the header must
+    /// still count accurately how many of the requested ids actually produced text.
+    @Test("One unknown id does not sink the whole batch, and the count stays accurate")
     func partialBatchStillAnswers() async {
         let result = await call(
             "screenshot_extract_text",
             ["ids": .array([.string(Fixtures.photograph), .string(Fixtures.middle)])])
         #expect(!result.isError)
+        #expect(result.text.contains("Text from 1 of 2 screenshots"))
         #expect(result.text.contains("Total 42,30 €"))
     }
 
-    @Test("A screenshot with no recognisable text says so rather than looking empty")
-    func blankScreenshotIsExplicit() async {
-        let result = await call(
+    /// Two distinct "no text" outcomes must stay distinguishable: a screenshot Vision
+    /// found nothing in is not the same failure as one whose pixels could not even be
+    /// read (the iCloud-eviction case), and each must say so rather than looking empty.
+    @Test("A blank screenshot and an unreadable one report different, explicit reasons")
+    func extractFailuresAreExplicit() async {
+        let blank = await call(
             "screenshot_extract_text", ["ids": .array([.string(Fixtures.blank)])])
-        #expect(!result.isError)
-        #expect(result.text.contains("no text recognised"))
-    }
+        #expect(!blank.isError)
+        #expect(blank.text.contains("no text recognised"))
 
-    @Test("A screenshot whose pixels cannot be read reports the reason")
-    func unreadableScreenshotReportsWhy() async {
         let store = FakeScreenshotStore()
         store.unreadable = [Fixtures.newest]
-        let result = await call(
+        let unreadable = await call(
             "screenshot_extract_text", ["ids": .array([.string(Fixtures.newest)])], store: store)
-        #expect(!result.isError)
-        #expect(result.text.contains("cannot read:"))
+        #expect(!unreadable.isError)
+        #expect(unreadable.text.contains("cannot read:"))
     }
 
     @Test("Repeated ids are deduplicated before OCR runs")
