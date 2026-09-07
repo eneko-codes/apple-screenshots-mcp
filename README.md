@@ -63,16 +63,30 @@ this, in those words, on every call.
 | `screenshots_list` | read | Screenshots newest first: id, capture time, pixel size. Optional date range, limit, offset. Nothing else. |
 | `screenshot_extract_text` | read | Vision OCR over several ids at once. Returns text per id. The only tool that reads content. |
 
-Three tools, all reads, so none carries a `create_`/`update_`/`delete_` prefix — the
-convention the sibling servers use for writes. There is nothing here to prefix.
+Three tools, all reads. Nothing here writes, so no tool carries a `create_`, `update_` or
+`delete_` prefix.
+
+## Frameworks and APIs
+
+| Used | For | Reference |
+|---|---|---|
+| PhotoKit — `PHPhotoLibrary`, `PHAssetCollection`, `PHAsset`, `PHFetchOptions`, `PHImageManager` | Listing the Screenshots smart album and fetching image data | [PhotoKit](https://developer.apple.com/documentation/photokit) |
+| Vision — `VNRecognizeTextRequest`, `VNImageRequestHandler`, `VNRecognizedTextObservation` | Text recognition | [Vision](https://developer.apple.com/documentation/vision) |
+| ImageIO — `CGImagePropertyOrientation` | Passing the asset's orientation to Vision | [Image I/O](https://developer.apple.com/documentation/imageio) |
+| `NSPhotoLibraryUsageDescription` | The consent string macOS shows | [Information Property List](https://developer.apple.com/documentation/bundleresources/information-property-list/nsphotolibraryusagedescription) |
+
+PhotoKit's entire write surface is unused — every `PHAssetChangeRequest` and
+`PHAssetCreationRequest`, the change-observation stack, `PHAssetResourceManager` and its
+upload jobs, content editing, Live Photos, and `PHProject`. Of Vision's 42 request classes
+this server uses one: barcodes, faces, document segmentation, classification, saliency and
+all tracking are available in the framework and deliberately not wired up.
 
 ## The rules worth knowing before you use it
 
 **Where your screenshots actually are.** Screenshots taken with ⌘⇧3 or ⌘⇧4 land on the
 Desktop as ordinary **files** and never reach Photos. This album holds the ones that came
 from an iPhone or iPad over iCloud Photos, or that you added to Photos by hand. If
-`screenshots_status` reports a count of zero on a machine full of screenshots, that is
-why — and a file-based server is the right tool for the Desktop ones.
+`screenshots_status` reports a count of zero on a machine full of screenshots, that is why.
 
 **Dates take exactly three forms:**
 
@@ -89,9 +103,10 @@ is how an off-by-one-day is caught before it becomes an answer.
 type. Text that came out of this server should be attributed to the recognition, not
 quoted as if it were the screenshot itself.
 
-**Vision detects the language on its own.** There is no language list to set: recognition
-runs with Vision's own automatic language detection on every call, whatever language the
-screenshot is actually in.
+**Recognition runs on Vision's default languages.** Neither `recognitionLanguages` nor
+`automaticallyDetectsLanguage` is set, and Vision's automatic detection defaults to off — so
+a screenshot in a language outside that default list may read poorly. Language correction is
+on, and only the top candidate per line is kept.
 
 **A bad id costs you that id, not the call.** Text extraction returns one outcome per id,
 so a stale identifier among five still leaves you the four that worked.
@@ -226,7 +241,7 @@ swift build
 swift test
 ```
 
-35 tests, all against an in-memory fake. They need no permission and never touch a real
+29 tests, all against an in-memory fake. They need no permission and never touch a real
 photo library — see `CLAUDE.md`, whose first section is the rule that makes that
 non-negotiable.
 

@@ -16,6 +16,19 @@ This server only reads, so the one question is ever whether to read the owner's 
 
 A local MCP server (Swift 6, stdio transport) that reads the macOS Screenshots smart album through `PhotoKit` and extracts text from it with `Vision`. No network, no credential, no cloud API — recognition runs on this Mac, gated by TCC consent.
 
+## Apple frameworks
+
+[PhotoKit](https://developer.apple.com/documentation/photokit) — `PHPhotoLibrary`, `PHAssetCollection`, `PHAsset`, `PHFetchOptions`, `PHImageManager` — for the album and the image data; [Vision](https://developer.apple.com/documentation/vision) — `VNRecognizeTextRequest`, `VNImageRequestHandler`, `VNRecognizedTextObservation` — for the text; [Image I/O](https://developer.apple.com/documentation/imageio) `CGImagePropertyOrientation` to pass orientation across. Consent key: [`NSPhotoLibraryUsageDescription`](https://developer.apple.com/documentation/bundleresources/information-property-list/nsphotolibraryusagedescription).
+
+## Native surface not used
+
+Both frameworks offer far more than this server exposes. Check here before proposing a tool.
+
+- PhotoKit's whole write surface: `PHAssetChangeRequest`, `PHAssetCreationRequest`, `PHAssetCollectionChangeRequest`, `PHCollectionListChangeRequest`, `PHProjectChangeRequest`. None appears anywhere, and that is what makes the read-only claim true.
+- PhotoKit's change-observation stack (`PHChange`, `PHPersistentChange*`), `PHAssetResourceManager` and upload jobs, `PHContentEditingInput`/`Output`, `PHLivePhoto`, `PHCloudIdentifier`.
+- 41 of Vision's 42 request classes, including barcode detection, document segmentation, face and body analysis, classification, saliency, and all tracking and registration.
+- Within `VNRecognizeTextRequest`: `recognitionLanguages`, `automaticallyDetectsLanguage` (Vision defaults it off) and `minimumTextHeight` are never set. Do not claim the server auto-detects language.
+
 ## Commands
 
 ```bash
