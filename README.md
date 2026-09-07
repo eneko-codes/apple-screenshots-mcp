@@ -230,8 +230,7 @@ swift test
 photo library — see `CLAUDE.md`, whose first section is the rule that makes that
 non-negotiable.
 
-Manual verification against the live library is the owner's job; `verification.md` is
-the script for it.
+Manual verification against the live library is the owner's job.
 
 ## Licence
 
