@@ -241,7 +241,7 @@ swift build
 swift test
 ```
 
-29 tests, all against an in-memory fake. They need no permission and never touch a real
+The tests run entirely against an in-memory fake. They need no permission and never touch a real
 photo library — see `CLAUDE.md`, whose first section is the rule that makes that
 non-negotiable.
 
