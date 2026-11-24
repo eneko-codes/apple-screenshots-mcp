@@ -1,10 +1,9 @@
 import Foundation
-import MCP
 
 public enum ScreenshotsMCPServer {
 
     public static let name = "apple-screenshots-mcp"
-    public static let version = "1.0.0"
+    public static let version = "1.0.1"
 
     /// Returned from `initialize`. It carries what per-tool descriptions cannot state
     /// once: what the permission really covers, what this server refuses to carry across
@@ -46,23 +45,14 @@ public enum ScreenshotsMCPServer {
     /// this function opens a photo library by itself.
     public static func run(
         store: any ScreenshotStore = SystemScreenshotStore()
-    ) async throws {
-        let tools = ScreenshotTools(store: store)
-        let server = Server(
-            name: name,
-            version: version,
-            instructions: instructions,
-            capabilities: .init(tools: .init(listChanged: false))
-        )
-
-        await server.withMethodHandler(ListTools.self) { _ in .init(tools: ToolCatalog.all()) }
-        await server.withMethodHandler(CallTool.self) { await tools.handle($0) }
-
-        // The default StdioTransport logger is a no-op handler. Leave it that way: a
-        // logger writing to stdout would interleave with the JSON-RPC stream and break
-        // every response after the first log line.
+    ) async {
         Diagnostics.started(version: version)
-        try await server.start(transport: StdioTransport())
-        await server.waitUntilCompleted()
+        await serveStandardStreams(handler: handler(tools: ScreenshotTools(store: store)))
+    }
+
+    public static func handler(tools: ScreenshotTools) -> MCPHandler {
+        MCPHandler(
+            name: name, version: version, instructions: instructions,
+            catalog: ToolCatalog.all(), tools: tools)
     }
 }
