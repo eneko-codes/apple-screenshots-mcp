@@ -18,6 +18,12 @@ final class FakeScreenshotStore: ScreenshotStore, @unchecked Sendable {
     /// What dispatch actually asked for, so the suite can prove the ceiling and the
     /// deduplication happen before any OCR would run.
     private(set) var extractCalls: [[String]] = []
+    /// When set, the call delivers what it has read and then waits until it is cancelled,
+    /// as an OCR that never finishes would.
+    var stallAfter: Int?
+    /// When set, `list` waits until it is cancelled.
+    var stallList = false
+    var failureText = "Photos returned no image data for this asset."
 
     init(
         status: PhotoAuthorization = .authorized,
@@ -41,29 +47,42 @@ final class FakeScreenshotStore: ScreenshotStore, @unchecked Sendable {
     func count() async throws -> Int { screenshots.count }
 
     func list(from: Date?, to: Date?, limit: Int, offset: Int) async throws -> ScreenshotPage {
+        if stallList { try await Self.waitUntilCancelled() }
         var matches = screenshots
         if let from { matches = matches.filter { ($0.creationDate ?? .distantPast) >= from } }
         if let to { matches = matches.filter { ($0.creationDate ?? .distantPast) < to } }
         // Newest first, as the real store's sort descriptor does.
-        matches.sort { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
+        // Ties by id, as the real store's second sort descriptor does.
+        matches.sort {
+            let (left, right) = ($0.creationDate ?? .distantPast, $1.creationDate ?? .distantPast)
+            return left == right ? $0.id < $1.id : left > right
+        }
         let page = matches.dropFirst(offset).prefix(limit)
         return ScreenshotPage(results: Array(page), total: matches.count)
     }
 
-    func extractText(ids: [String]) async throws -> [TextExtraction] {
+    func extractText(ids: [String], deliver: @Sendable (TextExtraction) -> Void) async throws {
         extractCalls.append(ids)
 
-        return ids.map { id in
+        for (index, id) in ids.enumerated() {
+            if let stallAfter, index >= stallAfter { try await Self.waitUntilCancelled() }
             guard let screenshot = screenshots.first(where: { $0.id == id }) else {
-                return .outOfScope(id: id)
+                deliver(.outOfScope(id: id))
+                continue
             }
             if unreadable.contains(id) {
-                return TextExtraction(
-                    id: id, screenshot: screenshot, lines: [],
-                    failure: "Photos returned no image data for this asset.")
+                deliver(
+                    TextExtraction(
+                        id: id, screenshot: screenshot, lines: [],
+                        failure: failureText))
+                continue
             }
-            return .recognised(screenshot, lines: text[id] ?? [])
+            deliver(.recognised(screenshot, lines: text[id] ?? []))
         }
+    }
+
+    private static func waitUntilCancelled() async throws {
+        while true { try await Task.sleep(for: .seconds(1)) }
     }
 }
 

@@ -60,8 +60,8 @@ this, in those words, on every call.
 | Tool | Kind | What it does |
 |---|---|---|
 | `screenshots_status` | read | Permission state, how many screenshots are in scope, the fixed operating limits, and what the grant actually covers. Reads no image. |
-| `screenshots_list` | read | Screenshots newest first: id, capture time, pixel size. Optional date range, limit, offset. Nothing else. |
-| `screenshot_extract_text` | read | Vision OCR over several ids at once. Returns text per id. The only tool that reads content. |
+| `screenshots_list` | read | Screenshots newest first (ties by id), one page at a time: id, capture time, pixel size. `from_date` and `to_date` bound the range, `limit` and `offset` select the page. Nothing else. |
+| `screenshot_extract_text` | read | Vision OCR over several `ids` at once. Returns each screenshot's text through a window; `character_offset` and `max_characters` read the rest. The only tool that reads content. |
 
 Three tools, all reads. Nothing here writes, so no tool carries a `create_`, `update_` or
 `delete_` prefix.
@@ -96,8 +96,22 @@ from an iPhone or iPad over iCloud Photos, or that you added to Photos by hand. 
 2026-08-12T09:00:00+02:00   explicit offset
 ```
 
-`to` is **exclusive**, and every listing echoes the range and time zone it resolved, which
-is how an off-by-one-day is caught before it becomes an answer.
+`from_date` and `to_date` are both **inclusive**, and `to_date` is inclusive at the precision
+written: `to_date=2026-08-12` covers the whole of that day. A date that does not exist (30
+February, an hour a clock change skips) is refused. Every listing echoes the range and time
+zone it resolved, which is how an off-by-one-day is caught before it becomes an answer.
+
+**Every answer is bounded, and says what it left out.** A listing returns one page, newest
+first and ties by id, so a second page starts exactly where the first ended; the first
+lines of a result say how many screenshots match and the `offset` that returns the next
+page. The text of each screenshot comes through a window: with no argument a usual page of
+text is shared among the ids asked for, and when a screenshot holds more, the first lines
+give the `character_offset` that continues it (call again with only that id).
+`max_characters` sets the window. A number outside its range is moved into it and the
+result says which value was used; an argument a tool does not list is refused, with the
+names it does. The exact ranges are in each tool's schema, and `screenshots_status` reports
+the ones in force. A call that has not finished after 45 seconds returns the screenshots
+read so far and says so, or an error when none was read.
 
 **OCR is a reading, not a transcript.** Vision misreads small, stylised and low-contrast
 type. Text that came out of this server should be attributed to the recognition, not
@@ -200,7 +214,7 @@ bundle declares all three tools in its manifest — that is where policy lives, 
 code. Turning off `screenshot_extract_text` leaves a server that can only say what
 screenshots exist and never reads one.
 
-Page size, the extraction ceiling, and Vision's automatic language detection are fixed in
+Page size, the extraction ceiling, the windows and the time limit are fixed in
 `Configuration` rather than left open-ended. `screenshots_status` reports the limits
 actually in force, which is the quickest way to check what a running server enforces.
 

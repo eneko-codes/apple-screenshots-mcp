@@ -29,6 +29,9 @@ public enum ToolError: Error, Equatable {
     case endBeforeStart
     case tooManyIDs(count: Int, maximum: Int)
     case storeFailure(String)
+    case unknownTool(String)
+    case unknownArguments([String], allowed: [String])
+    case timedOut(seconds: Int)
 
     public var message: String {
         switch self {
@@ -56,14 +59,14 @@ public enum ToolError: Error, Equatable {
 
         case .badDate(let argument, let value):
             return """
-                Argument '\(argument)' is not a date this server accepts: '\(value)'
+                Argument '\(argument)' is not a date this server accepts: '\(ToolStandard.echo(value))'
 
                 Use one of:
                 \(DateParsing.acceptedForms)
                 """
 
         case .endBeforeStart:
-            return "'to' is before 'from'. A date range cannot end before it begins."
+            return "to_date is before from_date. A date range cannot end before it begins."
 
         case .tooManyIDs(let count, let maximum):
             return """
@@ -76,7 +79,27 @@ public enum ToolError: Error, Equatable {
                 """
 
         case .storeFailure(let detail):
-            return "Photos returned an error: \(detail)"
+            return "Photos returned an error: \(detail.prefix(300))"
+
+        case .unknownTool(let name):
+            return "'\(ToolStandard.echo(name))' is not a tool of this server."
+
+        case .unknownArguments(let names, let allowed):
+            let shown = names.prefix(3).map { "'\(ToolStandard.echo($0))'" }.joined(separator: ", ")
+            let more = names.count > 3 ? " and \(names.count - 3) more" : ""
+            let list = allowed.isEmpty ? "none" : allowed.joined(separator: ", ")
+            return """
+                Not an argument of this tool: \(shown)\(more). Allowed: \(list).
+                """
+
+        case .timedOut(let seconds):
+            return """
+                The call did not finish within \(seconds) seconds and was abandoned. This \
+                server only reads, so nothing was changed.
+
+                Photos may be waiting on an iCloud download or on the consent dialog. Try \
+                again with fewer ids, or with a narrower date range and a smaller limit.
+                """
         }
     }
 
