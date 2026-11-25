@@ -61,8 +61,11 @@ public struct SystemScreenshotStore: ScreenshotStore {
     /// - The `mediaType` predicate keeps a video out even if one somehow lands in the
     ///   album. OCR over a video frame is not something this server should quietly do.
     ///
-    /// Sorted newest first, because that is the order the questions come in.
-    private func fetchScreenshots(from: Date?, to: Date?) throws -> PHFetchResult<PHAsset> {
+    /// Sorted newest first, because that is the order the questions come in, and by
+    /// identifier within the same instant so that paging never repeats or skips a row.
+    private func fetchScreenshots(from: Date?, to: Date?, ids: [String]? = nil) throws
+        -> PHFetchResult<PHAsset>
+    {
         guard
             let album = PHAssetCollection.fetchAssetCollections(
                 with: .smartAlbum, subtype: .smartAlbumScreenshots, options: nil
@@ -72,10 +75,17 @@ public struct SystemScreenshotStore: ScreenshotStore {
         var predicates = [NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)]
         if let from { predicates.append(NSPredicate(format: "creationDate >= %@", from as NSDate)) }
         if let to { predicates.append(NSPredicate(format: "creationDate < %@", to as NSDate)) }
+        // Still a fetch inside the album: the identifiers only narrow what that fetch
+        // returns, so one that names a photograph matches nothing. `localIdentifier` is
+        // among the keys Photos documents for a predicate and for a sort on assets.
+        if let ids { predicates.append(NSPredicate(format: "localIdentifier IN %@", ids)) }
 
         let options = PHFetchOptions()
         options.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
-        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        options.sortDescriptors = [
+            NSSortDescriptor(key: "creationDate", ascending: false),
+            NSSortDescriptor(key: "localIdentifier", ascending: true),
+        ]
         return PHAsset.fetchAssets(in: album, options: options)
     }
 
@@ -109,40 +119,39 @@ public struct SystemScreenshotStore: ScreenshotStore {
         return ScreenshotPage(results: results, total: total)
     }
 
-    public func extractText(ids: [String]) async throws -> [TextExtraction] {
+    public func extractText(ids: [String], deliver: @Sendable (TextExtraction) -> Void)
+        async throws
+    {
         // Ids are matched inside the album rather than looked up in the library. An id
         // naming a photograph simply never matches, which is what makes "photographs are
         // unreachable" true of ids as well as of listings.
-        let fetched = try fetchScreenshots(from: nil, to: nil)
-        let wanted = Set(ids)
+        let fetched = try fetchScreenshots(from: nil, to: nil, ids: ids)
         var assets: [String: PHAsset] = [:]
-        for index in 0..<fetched.count where assets.count < wanted.count {
+        for index in 0..<fetched.count {
             let asset = fetched.object(at: index)
-            if wanted.contains(asset.localIdentifier) {
-                assets[asset.localIdentifier] = asset
-            }
+            assets[asset.localIdentifier] = asset
         }
 
-        var results: [TextExtraction] = []
-        results.reserveCapacity(ids.count)
         for id in ids {
+            try Task.checkCancellation()
             guard let asset = assets[id] else {
-                results.append(.outOfScope(id: id))
+                deliver(.outOfScope(id: id))
                 continue
             }
             let screenshot = Self.describe(asset)
             do {
                 let lines = try await recognizeText(in: asset)
-                results.append(.recognised(screenshot, lines: lines))
+                deliver(.recognised(screenshot, lines: lines))
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 // One unreadable screenshot must not cost the caller the other four.
-                results.append(
+                deliver(
                     TextExtraction(
                         id: id, screenshot: screenshot, lines: [],
                         failure: error.localizedDescription))
             }
         }
-        return results
     }
 
     // MARK: Vision

@@ -23,6 +23,13 @@ public enum ToolCatalog {
         [status, list, extract]
     }
 
+    /// The arguments a tool declares, read from its schema so that what is accepted and
+    /// what is advertised cannot differ.
+    public static func argumentNames(of toolName: String) -> [String] {
+        let schema = all().first { $0.name == toolName }?.inputSchema
+        return (schema?.objectValue?["properties"]?.objectValue ?? [:]).keys.sorted()
+    }
+
     // MARK: Schema helpers
 
     private static func object(properties: [String: Value], required: [String] = []) -> Value {
@@ -45,13 +52,15 @@ public enum ToolCatalog {
         .object(["type": .string("string"), "description": .string(description)])
     }
 
-    private static func integer(_ description: String, minimum: Int, maximum: Int, default def: Int)
+    private static func integer(_ description: String, range: ClosedRange<Int>, default def: Int? = nil)
         -> Value
     {
-        .object([
+        var schema: [String: Value] = [
             "type": .string("integer"), "description": .string(description),
-            "minimum": .int(minimum), "maximum": .int(maximum), "default": .int(def),
-        ])
+            "minimum": .int(range.lowerBound), "maximum": .int(range.upperBound),
+        ]
+        if let def { schema["default"] = .int(def) }
+        return .object(schema)
     }
 
     private static let dateHelp = """
@@ -82,27 +91,32 @@ public enum ToolCatalog {
         name: listName,
         title: "List screenshots",
         description: """
-            Lists screenshots from the macOS Screenshots smart album, newest first, \
-            with an id, when it was taken and its pixel size. Optionally bounded by a \
-            date range.
+            Lists screenshots from the macOS Screenshots smart album, newest first (ties \
+            by id), \(Configuration.listLimit) to a page, each with an id, when it was \
+            taken and its pixel size. With no argument it returns the newest page. When \
+            more match than the page holds, the first lines of the result say how many \
+            there are and the offset to pass for the next page; limit goes up to \
+            \(Configuration.listLimitRange.upperBound). from_date and to_date bound the \
+            range, both inclusive: to_date=2026-08-12 includes the whole of that day.
 
             Returns METADATA ONLY. There is no image, no thumbnail, no file path and \
-            no export — the ids exist so screenshot_extract_text can be pointed at a \
+            no export: the ids exist so screenshot_extract_text can be pointed at a \
             few screenshots instead of the whole album. Photographs are not in this \
             album and cannot be listed here.
             """,
         inputSchema: object(properties: [
-            "from": string("Earliest capture time to include (inclusive). \(dateHelp)"),
-            "to": string("Latest capture time, exclusive. \(dateHelp)"),
+            "from_date": string("Earliest capture time to include. \(dateHelp)"),
+            "to_date": string(
+                "Latest capture time to include, inclusive at the precision written. \(dateHelp)"
+            ),
             "limit": integer(
-                "Maximum number of screenshots to return.",
-                minimum: Configuration.listLimitRange.lowerBound,
-                maximum: Configuration.listLimitRange.upperBound,
-                default: Configuration.listLimit),
+                "Maximum number of screenshots in one page.",
+                range: Configuration.listLimitRange, default: Configuration.listLimit),
             "offset": integer(
-                "Skip this many matches; use it to page.",
-                minimum: Configuration.offsetRange.lowerBound,
-                maximum: Configuration.offsetRange.upperBound, default: 0),
+                """
+                Number of screenshots to skip. A result that does not hold every match \
+                says, in its first lines, the offset to pass for the next page.
+                """, range: Configuration.offsetRange, default: 0),
         ]),
         annotations: .init(
             readOnlyHint: true, destructiveHint: false, idempotentHint: true,
@@ -113,17 +127,24 @@ public enum ToolCatalog {
         name: extractName,
         title: "Extract text from screenshots",
         description: """
-            Runs Vision text recognition over one or more screenshots and returns the \
-            recognised text, in reading order, per id. Up to \
-            \(Configuration.maximumExtractIDs) ids per call — pass several rather than \
-            calling repeatedly.
+            Runs Vision text recognition over one to \(Configuration.maximumExtractIDs) \
+            screenshots and returns the recognised text, in reading order, per id. Each \
+            screenshot's text is returned through a window: with no argument, about \
+            \(Configuration.defaultMaxCharacters) characters shared among the ids asked \
+            for. When a screenshot holds more, the first lines of the result say so and \
+            give the character_offset that continues it; to read the rest of one, call \
+            again with only its id. max_characters (up to \
+            \(Configuration.maxCharactersRange.upperBound)) sets the window of each \
+            screenshot, and a window that would not fit the answer is made smaller, as the \
+            first lines say. A call that reaches its time limit returns the screenshots \
+            read so far and says so.
 
             Ids come from screenshots_list and are resolved inside the Screenshots \
             album, so an id naming an ordinary photograph is reported as out of scope \
             rather than read. The answer is text: no image data is returned by this \
             tool or by any other in this server.
 
-            Recognition always uses Vision's own automatic language detection — there is \
+            Recognition uses Vision's default languages and language correction; there is \
             no language list to configure. OCR is imperfect on small or stylised type. \
             Treat the text as a reading of the screenshot, not as a transcript to quote \
             verbatim without saying so.
@@ -133,11 +154,23 @@ public enum ToolCatalog {
                 "ids": .object([
                     "type": .string("array"),
                     "items": .object(["type": .string("string")]),
-                    "maxItems": .int(Configuration.maximumExtractIDs),
+                    "minItems": .int(Configuration.extractIDsRange.lowerBound),
+                    "maxItems": .int(Configuration.extractIDsRange.upperBound),
                     "description": .string(
                         "Identifiers returned by screenshots_list. Several at once is "
                             + "cheaper than one call each."),
-                ])
+                ]),
+                "character_offset": integer(
+                    """
+                    Number of characters of each screenshot's text to skip. A result that \
+                    does not hold all of a screenshot says, in its first lines, the value \
+                    to pass for the rest; pass it with only that screenshot's id.
+                    """, range: Configuration.offsetRange, default: 0),
+                "max_characters": integer(
+                    """
+                    The most characters of each screenshot's text to return. Without it, \
+                    \(Configuration.defaultMaxCharacters) divided by the number of ids.
+                    """, range: Configuration.maxCharactersRange),
             ],
             required: ["ids"]),
         annotations: .init(

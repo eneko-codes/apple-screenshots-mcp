@@ -22,15 +22,18 @@ public protocol ScreenshotStore: Sendable {
     /// caller can tell "no matches in that range" apart from "the album is empty".
     func count() async throws -> Int
 
-    /// Newest first. `offset` indexes into the matches; the album is finite and already
-    /// ordered, so no cursor is needed.
+    /// Newest first, and ties by id ascending, so that no two screenshots can change
+    /// places between one page and the next. `from` is included and `to` is the first
+    /// instant NOT included. `offset` indexes into the matches; the album is finite and
+    /// already ordered, so no cursor is needed.
     func list(from: Date?, to: Date?, limit: Int, offset: Int) async throws -> ScreenshotPage
 
-    /// Runs OCR over each id and returns one outcome per id, in the order given.
+    /// Runs OCR over each id, in the order given, and hands each outcome to `deliver` as
+    /// soon as it is ready, so that a call stopped at its deadline still has what was read.
     ///
     /// Ids that are not in the Screenshots album come back as `.outOfScope` rather than
     /// throwing: an id naming a photograph must fail, but it must fail per-id and say why.
-    /// There is no language parameter: recognition always uses Vision's own automatic
-    /// language detection.
-    func extractText(ids: [String]) async throws -> [TextExtraction]
+    /// There is no language parameter: recognition uses Vision's defaults. Checks for
+    /// cancellation between ids, because the deadline cancels the work it abandons.
+    func extractText(ids: [String], deliver: @Sendable (TextExtraction) -> Void) async throws
 }

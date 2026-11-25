@@ -58,9 +58,9 @@ public struct Format: Sendable {
 
     // MARK: Tools
 
-    public func list(_ page: ScreenshotPage, from: ParsedDate?, to: ParsedDate?, offset: Int)
-        -> String
-    {
+    /// The header and one line per screenshot. What the page leaves out is announced by the
+    /// caller, before this text, with `Notice.page`.
+    public func list(_ page: ScreenshotPage, from: ParsedDate?, to: ParsedDate?) -> String {
         let range: String
         switch (from, to) {
         case (nil, nil):
@@ -68,7 +68,7 @@ public struct Format: Sendable {
         case (let start?, nil):
             range = "from \(echo(start)) onwards"
         case (nil, let end?):
-            range = "before \(echo(end))"
+            range = "up to \(echo(end))"
         case (let start?, let end?):
             range = "\(echo(start)) → \(echo(end))"
         }
@@ -77,10 +77,13 @@ public struct Format: Sendable {
         // off-by-one-day before the reader has to.
         let header =
             "\(page.total) screenshot\(page.total == 1 ? "" : "s") · \(range) · "
-            + "\(calendar.timeZone.identifier) · newest first"
+            + "\(calendar.timeZone.identifier) · ordered newest first, then by id"
 
-        guard !page.results.isEmpty else {
+        guard page.total > 0 else {
             return header + "\nNo screenshots match."
+        }
+        guard !page.results.isEmpty else {
+            return header + "\n(nothing at this offset)"
         }
 
         let stampWidth = page.results.map { stamp($0.creationDate).count }.max() ?? 0
@@ -92,40 +95,45 @@ public struct Format: Sendable {
             line += "  " + Self.pad(Self.size(screenshot), to: sizeWidth)
             lines.append(line + "  id=\(screenshot.id)")
         }
-
-        let shown = offset + page.results.count
-        if shown < page.total {
-            lines.append("…\(page.total - shown) more · call again with offset=\(shown)")
-        }
         return lines.joined(separator: "\n")
     }
 
-    /// One block per id, in the order the ids were given.
+    /// One block per id, in the order the ids were given, each screenshot's text cut to the
+    /// window asked for. The windows' notices come back separately because they go before
+    /// all the data, not beside each block.
     ///
     /// The recognised text is printed flush left under its header rather than indented,
     /// because indentation would silently change the content the caller asked for.
-    public func extracted(_ results: [TextExtraction]) -> String {
+    public func extracted(
+        _ results: [TextExtraction], characterOffset: Int, maxCharacters: Int
+    ) -> (text: String, notices: [String]) {
         let readable = results.filter { $0.failure == nil }.count
         var text =
             "Text from \(readable) of \(results.count) screenshot"
             + "\(results.count == 1 ? "" : "s")"
+        var notices: [String] = []
 
         for result in results {
-            var heading = "id=\(result.id)"
+            var heading = "id=\(result.screenshot == nil ? ToolStandard.echo(result.id) : result.id)"
             if let screenshot = result.screenshot {
                 heading += " · \(stamp(screenshot.creationDate)) · \(Self.size(screenshot))"
             }
             text += "\n\n--- \(heading)\n"
 
             if let failure = result.failure {
-                text += "(cannot read: \(failure))"
+                // A system error text has no length of its own to rely on.
+                text += "(cannot read: \(failure.prefix(300)))"
             } else if result.lines.isEmpty {
                 text += "(no text recognised in this screenshot)"
             } else {
-                text += result.lines.joined(separator: "\n")
+                let window = ToolStandard.window(
+                    of: result.lines.joined(separator: "\n"), characterOffset: characterOffset,
+                    maxCharacters: maxCharacters, label: "id=\(result.id)")
+                text += window.text
+                if let notice = window.notice { notices.append(notice) }
             }
         }
-        return text
+        return (text, notices)
     }
 
     public func status(
@@ -152,9 +160,10 @@ public struct Format: Sendable {
                 screenshotCount.map { "\($0) screenshot\($0 == 1 ? "" : "s") in the album" }
                     ?? "unknown — permission not granted, nothing was counted"
             ),
-            ("OCR languages", "Vision automatic detection, not configurable"),
-            ("default page size", "\(Configuration.listLimit)"),
+            ("OCR languages", "Vision defaults, not configurable"),
+            ("default page size", "\(Configuration.listLimit), at most \(Configuration.listLimitRange.upperBound)"),
             ("ids per extract call", "at most \(Configuration.maximumExtractIDs)"),
+            ("time limit per call", "\(Configuration.timeout.components.seconds) seconds"),
         ])
 
         text += "\n\n" + Self.scopeStatement

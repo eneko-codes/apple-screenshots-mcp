@@ -42,7 +42,7 @@ struct ScreenshotToolsTests {
     func schemasReflectConfiguration() {
         let extract = ToolCatalog.all().first { $0.name == "screenshot_extract_text" }
         #expect(
-            extract?.description?.contains("\(Configuration.maximumExtractIDs) ids per call")
+            extract?.description?.contains("one to \(Configuration.maximumExtractIDs) screenshots")
                 == true)
         let ids = extract?.inputSchema.objectValue?["properties"]?.objectValue?["ids"]
         #expect(ids?.objectValue?["maxItems"]?.intValue == Configuration.maximumExtractIDs)
@@ -181,9 +181,10 @@ struct ScreenshotToolsTests {
         #expect(result.text.contains("PHAssetCollectionSubtypeSmartAlbumScreenshots"))
         #expect(result.text.contains("No image data ever crosses"))
 
-        #expect(result.text.contains("Vision automatic detection"))
+        #expect(result.text.contains("Vision defaults"))
         #expect(result.text.contains("at most \(Configuration.maximumExtractIDs)"))
         #expect(result.text.contains("\(Configuration.listLimit)"))
+        #expect(result.text.contains("\(Configuration.timeout.components.seconds) seconds"))
     }
 
     // MARK: List
@@ -205,36 +206,37 @@ struct ScreenshotToolsTests {
     @Test("A date range filters and is echoed back in the form it arrived in")
     func listRangeIsEchoed() async {
         let result = await call(
-            "screenshots_list", ["from": .string("2026-08-01"), "to": .string("2026-08-09")])
+            "screenshots_list", ["from_date": .string("2026-08-01"), "to_date": .string("2026-08-09")])
         #expect(result.text.contains("2026-08-01 → 2026-08-09"))
         #expect(result.text.contains(Fixtures.middle))
         #expect(!result.text.contains(Fixtures.oldest), "July is outside the range")
-        #expect(!result.text.contains(Fixtures.newest), "'to' is exclusive")
+        #expect(result.text.contains(Fixtures.newest), "to_date covers the whole of its day")
     }
 
     @Test("Either bound may be given alone")
     func listAcceptsOneSidedRanges() async {
-        let openEnded = await call("screenshots_list", ["from": .string("2026-08-01")])
+        let openEnded = await call("screenshots_list", ["from_date": .string("2026-08-01")])
         #expect(openEnded.text.contains("from 2026-08-01 onwards"))
         #expect(!openEnded.text.contains(Fixtures.oldest))
 
-        let openStart = await call("screenshots_list", ["to": .string("2026-08-01")])
-        #expect(openStart.text.contains("before 2026-08-01"))
+        let openStart = await call("screenshots_list", ["to_date": .string("2026-08-01")])
+        #expect(openStart.text.contains("up to 2026-08-01"))
         #expect(openStart.text.contains(Fixtures.oldest))
     }
 
     @Test("A range that runs backwards is refused")
     func backwardsRangeIsRefused() async {
         let result = await call(
-            "screenshots_list", ["from": .string("2026-08-09"), "to": .string("2026-08-01")])
+            "screenshots_list", ["from_date": .string("2026-08-09"), "to_date": .string("2026-08-01")])
         #expect(result.isError)
         #expect(result.text.contains("cannot end before it begins"))
+        #expect(result.text.contains("to_date"))
     }
 
     @Test("A truncated page announces what it withheld")
     func truncationIsAnnounced() async {
         let result = await call("screenshots_list", ["limit": .int(2)])
-        #expect(result.text.contains("more · call again with offset=2"))
+        #expect(result.text.contains("Showing 1–2 of 4 screenshots. Pass offset=2 for the next page."))
     }
 
     @Test("Offset pages through the album")
@@ -247,14 +249,14 @@ struct ScreenshotToolsTests {
     @Test("An empty match says so instead of returning a bare header")
     func emptyMatchIsExplicit() async {
         let result = await call(
-            "screenshots_list", ["from": .string("2020-01-01"), "to": .string("2020-02-01")])
+            "screenshots_list", ["from_date": .string("2020-01-01"), "to_date": .string("2020-02-01")])
         #expect(!result.isError)
         #expect(result.text.contains("No screenshots match."))
     }
 
     @Test("A date this server does not accept is refused, naming the three forms")
     func badDateIsRefused() async {
-        let result = await call("screenshots_list", ["from": .string("09/08/2026")])
+        let result = await call("screenshots_list", ["from_date": .string("09/08/2026")])
         #expect(result.isError)
         #expect(result.text.contains("2026-08-12T09:00"))
     }
@@ -262,10 +264,11 @@ struct ScreenshotToolsTests {
     /// "Clamps rather than rejects: a model asking for 500 results means 'as many as you
     /// will give me'" (see Arguments.int). An out-of-range limit must not turn into an
     /// error the caller has to recover from.
-    @Test("An out-of-range limit is clamped rather than rejected")
+    @Test("An out-of-range limit is moved into range and the result says so")
     func limitIsClamped() async {
         let result = await call("screenshots_list", ["limit": .int(9999)])
         #expect(!result.isError)
+        #expect(result.text.hasPrefix("limit=9999 is outside 1–200; 200 was used."))
     }
 
     // MARK: Extract

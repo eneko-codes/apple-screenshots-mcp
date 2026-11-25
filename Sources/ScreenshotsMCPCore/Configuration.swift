@@ -17,17 +17,41 @@ import Foundation
 /// smart album, fixed in code; making it configurable would turn a guarantee into a
 /// preference.
 public enum Configuration {
-    /// Default page size for `screenshots_list`. The tool's own `limit` still wins.
+    /// Default page size for `screenshots_list`. Each row is one line of about a hundred
+    /// characters, so this is well under `ToolStandard.usualPage`.
     public static let listLimit = 50
+
+    /// The most rows one page may hold. 200 rows of the widest ordinary width are about
+    /// 20,000 characters, inside `ToolStandard.longestResult`; `BoundsTests` renders them.
+    public static let listLimitRange = 1...200
+
+    /// Paging ceiling. Declared here so the advertised schema and the enforced clamp
+    /// cannot drift: both read this one value.
+    public static let offsetRange = 0...10_000_000
 
     /// Ceiling on how many ids one `screenshot_extract_text` call may take. OCR decodes
     /// each screenshot at full resolution, so a batch is slow rather than free.
     public static let maximumExtractIDs = 10
+    public static let extractIDsRange = 1...maximumExtractIDs
 
-    public static let listLimitRange = 1...200
-    public static let extractIDsRange = 1...50
+    /// The window on the recognised text of each screenshot. The maximum is half the
+    /// longest result, so one screenshot's window of ordinary text leaves room for the
+    /// rest of the answer; `ToolStandard.fitting` shrinks a window when several
+    /// screenshots, or characters that take several UTF-16 units each, would not fit.
+    public static let maxCharactersRange = 1...(ToolStandard.longestResult / 2)
 
-    /// Paging ceiling. Declared here so the advertised schema and the enforced clamp
-    /// cannot drift: both read this one value.
-    public static let offsetRange = 0...100_000
+    /// What a call with no `max_characters` aims to return in all: a usual page of text,
+    /// shared by the screenshots asked for, so that a call is about one usual page whether
+    /// it names one id or ten.
+    public static let defaultMaxCharacters = ToolStandard.usualPage
+
+    /// The window each screenshot gets when `max_characters` is not given.
+    public static func defaultWindow(forIDs count: Int) -> Int {
+        Swift.max(defaultMaxCharacters / Swift.max(count, 1), maxCharactersRange.lowerBound)
+    }
+
+    /// How long a call may run before it is answered with what it has. It stays well under
+    /// the 60 seconds a client commonly waits, and so under `ToolStandard.timeLimit`, so
+    /// the answer is ours and not the client's generic "no result".
+    public static let timeout = Duration.seconds(45)
 }
